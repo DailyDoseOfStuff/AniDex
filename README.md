@@ -1,4 +1,4 @@
-This is an application to track anime and see what new anime is releaseing
+This is an application to track anime and see what new anime is releasing
 
 Using the anilist api, this application tracks 5,000+ anime 
 
