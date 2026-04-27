@@ -2,15 +2,19 @@
   "name": "anitrack",
   "private": true,
   "version": "1.0.0",
+  "type": "module",
   "description": "Personal anime tracking application",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "npm run build && wrangler dev",
+    "deploy": "npm run build && wrangler deploy"
   },
   "devDependencies": {
+    "@cloudflare/vite-plugin": "^1.33.2",
     "@emnapi/core": "^1.10.0",
     "@emnapi/runtime": "^1.10.0",
-    "vite": "^8.0.10"
+    "vite": "^8.0.10",
+    "wrangler": "^4.85.0"
   }
 }
