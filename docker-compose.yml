@@ -1,0 +1,34 @@
+version: '3.8'
+
+services:
+  # -----------------------------------------------------
+  # Production Service (Nginx)
+  # Uses the Dockerfile to build and serve the app
+  # Command: docker-compose up prod --build
+  # -----------------------------------------------------
+  prod:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8080:80" # Map host port 8080 to container port 80
+    restart: unless-stopped
+    container_name: anitrack-prod
+
+  # -----------------------------------------------------
+  # Development Service (Vite Dev Server)
+  # Uses a base Node image with volume mapping for live reloading
+  # Command: docker-compose up dev
+  # -----------------------------------------------------
+  dev:
+    image: node:20-alpine
+    working_dir: /app
+    volumes:
+      - ./:/app
+      - /app/node_modules # Prevents host's node_modules from overwriting the container's
+    ports:
+      - "3000:3000"
+    command: sh -c "npm install && npm run dev"
+    environment:
+      - CHOKIDAR_USEPOLLING=true # Ensures hot-reloading works properly across OS boundaries
+    container_name: anitrack-dev
