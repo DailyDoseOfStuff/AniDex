@@ -3,7 +3,7 @@
  * Poster card with hover effects and popup trigger
  */
 import { getPreferredTitle, getAnimeStatus } from '../data/storage.js';
-import { showPopup, hidePopup } from './animePopup.js';
+import { showPopup, hidePopup, startHidePopupTimer, cancelHidePopupTimer } from './animePopup.js';
 import { showListModal } from './listModal.js';
 
 /**
@@ -84,6 +84,7 @@ export function createAnimeCard(anime, options = {}) {
   let hoverTimeout;
   card.addEventListener('mouseenter', (e) => {
     if (window.innerWidth < 768) return; // Skip on mobile
+    cancelHidePopupTimer();
     hoverTimeout = setTimeout(() => {
       showPopup(anime, card);
     }, 400);
@@ -91,7 +92,7 @@ export function createAnimeCard(anime, options = {}) {
 
   card.addEventListener('mouseleave', () => {
     clearTimeout(hoverTimeout);
-    hidePopup();
+    startHidePopupTimer();
   });
 
   return card;

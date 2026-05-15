@@ -6,12 +6,13 @@ import { getPreferredTitle, getAnimeStatus } from '../data/storage.js';
 import { showListModal } from './listModal.js';
 
 let currentPopup = null;
-let popupTimeout = null;
+let hideTimeout = null;
 
 /**
  * Show popup near the hovered card
  */
 export function showPopup(anime, cardElement) {
+  cancelHidePopupTimer();
   hidePopup();
 
   const root = document.getElementById('popup-root');
@@ -91,10 +92,10 @@ export function showPopup(anime, cardElement) {
 
   // Keep popup alive when hovering over it
   popup.addEventListener('mouseenter', () => {
-    clearTimeout(popupTimeout);
+    cancelHidePopupTimer();
   });
   popup.addEventListener('mouseleave', () => {
-    hidePopup();
+    startHidePopupTimer();
   });
 
   // Add to list button
@@ -115,16 +116,27 @@ export function showPopup(anime, cardElement) {
   currentPopup = popup;
 }
 
+export function startHidePopupTimer() {
+  clearTimeout(hideTimeout);
+  hideTimeout = setTimeout(() => {
+    hidePopup();
+  }, 200); // 200ms grace period to move mouse to the popup
+}
+
+export function cancelHidePopupTimer() {
+  clearTimeout(hideTimeout);
+}
+
 /**
  * Hide the current popup
  */
 export function hidePopup() {
-  clearTimeout(popupTimeout);
+  cancelHidePopupTimer();
   if (currentPopup) {
     currentPopup.classList.remove('popup-enter');
     currentPopup.classList.add('popup-exit');
     const el = currentPopup;
-    setTimeout(() => el.remove(), 150);
+    setTimeout(() => el?.remove(), 150);
     currentPopup = null;
   }
 }
