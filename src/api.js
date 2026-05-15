@@ -443,3 +443,36 @@ export async function fetchAnimeByMalIds(malIds) {
   
   return results;
 }
+
+/**
+ * Fetch a list of anime by their AniList IDs
+ * @param {number[]} alIds - Array of AniList IDs
+ * @returns {Promise<object[]>} Array of anime objects
+ */
+export async function fetchAnimeByALIds(alIds) {
+  if (!alIds || alIds.length === 0) return [];
+  
+  const queryStr = `
+    query($idIn: [Int]) {
+      Page(perPage: 50) {
+        media(id_in: $idIn, type: ANIME) {
+          ${MEDIA_CARD_FIELDS}
+        }
+      }
+    }
+  `;
+  
+  const results = [];
+  for (let i = 0; i < alIds.length; i += 50) {
+    const batch = alIds.slice(i, i + 50);
+    try {
+      const result = await query(queryStr, { idIn: batch });
+      if (result && result.Page && result.Page.media) {
+        results.push(...result.Page.media);
+      }
+    } catch (e) {
+      console.warn('Failed to fetch batch for AL IDs', e);
+    }
+  }
+  return results;
+}

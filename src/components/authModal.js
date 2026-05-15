@@ -16,8 +16,8 @@ export function showAuthModal() {
   let mode = 'signin'; // 'signin' | 'signup'
   let loading = false;
   let error = '';
-  let captchaNum1 = Math.floor(Math.random() * 10) + 1;
-  let captchaNum2 = Math.floor(Math.random() * 10) + 1;
+  let turnstileToken = null;
+  let turnstileWidgetId = null;
 
   // Create backdrop (also serves as flex centering container)
   const backdrop = document.createElement('div');
@@ -85,17 +85,9 @@ export function showAuthModal() {
             class="w-full px-4 py-3 rounded-xl bg-surface-container border border-white/10 text-on-surface font-body-md placeholder:text-on-surface-variant/50 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/30 transition-colors"
           />
           
-          <!-- Human Verification -->
-          <div class="flex items-center gap-3 bg-surface-container border border-white/10 rounded-xl px-4 py-3 focus-within:border-primary/50 focus-within:ring-1 focus-within:ring-primary/30 transition-colors">
-            <span class="text-on-surface-variant font-body-md whitespace-nowrap select-none">Verify: ${captchaNum1} + ${captchaNum2} =</span>
-            <input
-              id="auth-captcha"
-              type="number"
-              placeholder="?"
-              required
-              class="flex-1 bg-transparent text-on-surface font-body-md placeholder:text-on-surface-variant/50 focus:outline-none w-full"
-            />
-          </div>
+          <!-- Human Verification (Cloudflare Turnstile) -->
+          <div id="turnstile-container" class="flex justify-center min-h-[65px]"></div>
+          
           <button type="submit" class="w-full px-4 py-3 rounded-xl bg-primary text-on-primary font-label-lg text-label-lg hover:bg-primary/90 transition-colors ${loading ? 'opacity-50 pointer-events-none' : ''}">
             ${loading ? `
               <span class="inline-flex items-center gap-2">
@@ -146,12 +138,8 @@ export function showAuthModal() {
       e.stopPropagation();
       const email = modal.querySelector('#auth-email').value;
       const password = modal.querySelector('#auth-password').value;
-      const captchaAns = parseInt(modal.querySelector('#auth-captcha').value, 10);
-      
-      if (captchaAns !== (captchaNum1 + captchaNum2)) {
-        error = 'Human verification failed. Please try again.';
-        captchaNum1 = Math.floor(Math.random() * 10) + 1;
-        captchaNum2 = Math.floor(Math.random() * 10) + 1;
+      if (!turnstileToken) {
+        error = 'Please complete the human verification.';
         render();
         return;
       }
@@ -180,8 +168,7 @@ export function showAuthModal() {
     modal.querySelector('#auth-toggle-mode').addEventListener('click', () => {
       mode = isSignIn ? 'signup' : 'signin';
       error = '';
-      captchaNum1 = Math.floor(Math.random() * 10) + 1;
-      captchaNum2 = Math.floor(Math.random() * 10) + 1;
+      turnstileToken = null;
       render();
     });
 
@@ -204,6 +191,27 @@ export function showAuthModal() {
         render();
       }
     });
+
+    // Render Turnstile
+    if (window.turnstile) {
+      if (turnstileWidgetId !== null) {
+        window.turnstile.remove(turnstileWidgetId);
+      }
+      try {
+        turnstileWidgetId = window.turnstile.render('#turnstile-container', {
+          sitekey: '1x00000000000000000000AA', // Cloudflare dummy test key (always passes)
+          theme: 'dark',
+          callback: function(token) {
+            turnstileToken = token;
+          },
+          'error-callback': function() {
+            turnstileToken = null;
+          }
+        });
+      } catch (e) {
+        console.error('Turnstile render error:', e);
+      }
+    }
   }
 
   render();

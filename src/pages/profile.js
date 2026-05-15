@@ -6,9 +6,9 @@
 import { 
   getListCounts, getTotalEpisodesWatched, getTopGenres, 
   getRecentlyAdded, getPreferredTitle, LIST_LABELS, LIST_ICONS, LIST_CATEGORIES,
-  onChange, exportData, importData, addToList
+  onChange, exportData, importData, addToList, clearWatchlist
 } from '../data/storage.js';
-import { fetchAnimeByMalIds } from '../api.js';
+import { fetchAnimeByMalIds, fetchAnimeByALIds } from '../api.js';
 import { getCurrentUser, getUserInfo, signOut, isLoggedIn, isAnonymous } from '../auth.js';
 import { showAuthModal } from '../components/authModal.js';
 
@@ -79,7 +79,11 @@ function renderPage(app) {
               </button>
             ` : ''}
           </div>
-          <div class="md:ml-auto flex gap-2 flex-wrap justify-center md:justify-end">
+          <div class="md:ml-auto flex gap-2 flex-wrap justify-center md:justify-end items-center">
+            <select id="import-mode" class="bg-surface-container-high text-on-surface-variant px-3 py-2 rounded-lg border border-white/5 outline-none font-label-md appearance-none cursor-pointer">
+              <option value="merge">Merge (Add to existing)</option>
+              <option value="replace">Replace (Overwrite existing)</option>
+            </select>
             <button id="import-btn" class="relative bg-surface-container-high text-on-surface-variant px-4 py-2 rounded-lg font-label-lg text-label-lg flex items-center gap-2 hover:bg-surface-variant transition-colors border border-white/5 cursor-pointer">
               <span class="material-symbols-outlined text-[18px]">upload</span>
               Import Data
@@ -260,6 +264,8 @@ function renderPage(app) {
       const file = e.target.files[0];
       if (!file) return;
 
+      const importMode = document.getElementById('import-mode')?.value || 'merge';
+
       // Show temporary loading indicator
       const btn = document.getElementById('import-btn');
       const originalText = btn.innerHTML;
@@ -269,17 +275,47 @@ function renderPage(app) {
       const reader = new FileReader();
       reader.onload = async (event) => {
         const text = event.target.result;
+        
+        let alItems = []; // { id, category }
+        let malItems = []; // { malId, category }
+
         try {
+          if (importMode === 'replace') {
+            await clearWatchlist();
+          }
+
           if (file.name.endsWith('.json')) {
             const data = JSON.parse(text);
-            await importData(data);
-            alert('Import successful!');
+            if (data.watchlist) {
+              // Native AniTrack JSON
+              await importData(data);
+              alert('Import successful!');
+              return;
+            } else {
+              // 3rd party JSON format
+              for (const [key, list] of Object.entries(data)) {
+                let category = LIST_CATEGORIES.PLAN_TO_WATCH;
+                if (key.toLowerCase() === 'watching') category = LIST_CATEGORIES.WATCHING;
+                else if (key.toLowerCase() === 'completed') category = LIST_CATEGORIES.COMPLETED;
+                else if (key.toLowerCase() === 'on-hold' || key.toLowerCase() === 'onhold') category = LIST_CATEGORIES.ON_HOLD;
+                
+                for (const item of list) {
+                  if (item.al) {
+                    const match = item.al.match(/anilist\.co\/anime\/(\d+)/);
+                    if (match) alItems.push({ id: parseInt(match[1]), category });
+                  } else if (item.mal) {
+                    const match = item.mal.match(/myanimelist\.net\/anime\/(\d+)/);
+                    if (match) malItems.push({ malId: parseInt(match[1]), category });
+                  }
+                }
+              }
+            }
           } else if (file.name.endsWith('.xml')) {
+            // MAL XML format
             const parser = new DOMParser();
             const xmlDoc = parser.parseFromString(text, "text/xml");
             const animes = xmlDoc.getElementsByTagName('anime');
             
-            const malData = [];
             for (let i = 0; i < animes.length; i++) {
               const node = animes[i];
               const malId = parseInt(node.getElementsByTagName('series_animedb_id')[0]?.textContent);
@@ -291,27 +327,71 @@ function renderPage(app) {
               else if (statusStr === 'On-Hold' || statusStr === 'Dropped') category = LIST_CATEGORIES.ON_HOLD;
               
               if (!isNaN(malId)) {
-                malData.push({ malId, category });
+                malItems.push({ malId, category });
               }
             }
-
-            if (malData.length === 0) {
-              alert('No valid anime found in XML.');
-              return;
-            }
-
-            const fetchedAnime = await fetchAnimeByMalIds(malData.map(d => d.malId));
+          } else if (file.name.endsWith('.txt')) {
+            // Plain text format with URLs
+            const lines = text.split('\n');
+            let currentCategory = LIST_CATEGORIES.PLAN_TO_WATCH;
             
-            let importedCount = 0;
-            for (const item of malData) {
-              const anime = fetchedAnime.find(a => a.idMal === item.malId);
+            for (const line of lines) {
+              const trimmed = line.trim();
+              if (trimmed.startsWith('###')) {
+                const catStr = trimmed.replace('###', '').trim().toLowerCase();
+                if (catStr === 'watching') currentCategory = LIST_CATEGORIES.WATCHING;
+                else if (catStr === 'completed') currentCategory = LIST_CATEGORIES.COMPLETED;
+                else if (catStr === 'on-hold' || catStr === 'on hold') currentCategory = LIST_CATEGORIES.ON_HOLD;
+                else if (catStr === 'planning' || catStr === 'plan to watch') currentCategory = LIST_CATEGORIES.PLAN_TO_WATCH;
+                continue;
+              }
+              
+              const alMatch = trimmed.match(/anilist\.co\/anime\/(\d+)/);
+              if (alMatch) {
+                alItems.push({ id: parseInt(alMatch[1]), category: currentCategory });
+                continue;
+              }
+              
+              const malMatch = trimmed.match(/myanimelist\.net\/anime\/(\d+)/);
+              if (malMatch) {
+                malItems.push({ malId: parseInt(malMatch[1]), category: currentCategory });
+              }
+            }
+          }
+
+          // Fetch missing AniList data
+          let importedCount = 0;
+          
+          if (malItems.length > 0) {
+            const fetchedMal = await fetchAnimeByMalIds(malItems.map(d => d.malId));
+            for (const item of malItems) {
+              const anime = fetchedMal.find(a => a.idMal === item.malId);
               if (anime) {
                 await addToList(anime.id, anime, item.category);
                 importedCount++;
               }
             }
-            alert(`Successfully imported ${importedCount} anime from MyAnimeList XML!`);
           }
+          
+          if (alItems.length > 0) {
+            const fetchedAl = await fetchAnimeByALIds(alItems.map(d => d.id));
+            for (const item of alItems) {
+              const anime = fetchedAl.find(a => a.id === item.id);
+              if (anime) {
+                await addToList(anime.id, anime, item.category);
+                importedCount++;
+              }
+            }
+          }
+
+          if (importedCount === 0 && (malItems.length > 0 || alItems.length > 0)) {
+            alert('Found items but failed to fetch data from AniList.');
+          } else if (importedCount > 0) {
+            alert(`Successfully imported ${importedCount} anime!`);
+          } else {
+            alert('No valid anime found in the file.');
+          }
+
         } catch (err) {
           console.error(err);
           alert('Failed to parse or import file.');

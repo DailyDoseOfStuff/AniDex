@@ -297,6 +297,14 @@ export async function removeFromAllLists(animeId) {
 }
 
 /**
+ * Clear all anime from the watchlist completely
+ */
+export async function clearWatchlist() {
+  await _saveWatchlist(_defaultWatchlist());
+  _dispatchChange();
+}
+
+/**
  * Move anime between categories
  */
 export async function moveToList(animeId, newCategory) {
