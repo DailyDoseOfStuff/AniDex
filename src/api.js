@@ -407,3 +407,39 @@ export const DAY_NAMES = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'
 export function clearCache() {
   cache.clear();
 }
+
+/**
+ * Fetch a list of anime by their MAL IDs
+ * @param {number[]} malIds - Array of MAL IDs
+ * @returns {Promise<object[]>} Array of anime objects
+ */
+export async function fetchAnimeByMalIds(malIds) {
+  if (!malIds || malIds.length === 0) return [];
+  
+  const queryStr = `
+    query($idMalIn: [Int]) {
+      Page(perPage: 50) {
+        media(idMal_in: $idMalIn, type: ANIME) {
+          idMal
+          ${MEDIA_CARD_FIELDS}
+        }
+      }
+    }
+  `;
+  
+  const results = [];
+  // AniList allows max 50 items per page, so batch
+  for (let i = 0; i < malIds.length; i += 50) {
+    const batch = malIds.slice(i, i + 50);
+    try {
+      const result = await query(queryStr, { idMalIn: batch });
+      if (result && result.Page && result.Page.media) {
+        results.push(...result.Page.media);
+      }
+    } catch (e) {
+      console.warn('Failed to fetch batch for MAL IDs', e);
+    }
+  }
+  
+  return results;
+}

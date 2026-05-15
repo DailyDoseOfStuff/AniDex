@@ -16,6 +16,8 @@ export function showAuthModal() {
   let mode = 'signin'; // 'signin' | 'signup'
   let loading = false;
   let error = '';
+  let captchaNum1 = Math.floor(Math.random() * 10) + 1;
+  let captchaNum2 = Math.floor(Math.random() * 10) + 1;
 
   // Create backdrop (also serves as flex centering container)
   const backdrop = document.createElement('div');
@@ -82,6 +84,18 @@ export function showAuthModal() {
             minlength="6"
             class="w-full px-4 py-3 rounded-xl bg-surface-container border border-white/10 text-on-surface font-body-md placeholder:text-on-surface-variant/50 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/30 transition-colors"
           />
+          
+          <!-- Human Verification -->
+          <div class="flex items-center gap-3 bg-surface-container border border-white/10 rounded-xl px-4 py-3 focus-within:border-primary/50 focus-within:ring-1 focus-within:ring-primary/30 transition-colors">
+            <span class="text-on-surface-variant font-body-md whitespace-nowrap select-none">Verify: ${captchaNum1} + ${captchaNum2} =</span>
+            <input
+              id="auth-captcha"
+              type="number"
+              placeholder="?"
+              required
+              class="flex-1 bg-transparent text-on-surface font-body-md placeholder:text-on-surface-variant/50 focus:outline-none w-full"
+            />
+          </div>
           <button type="submit" class="w-full px-4 py-3 rounded-xl bg-primary text-on-primary font-label-lg text-label-lg hover:bg-primary/90 transition-colors ${loading ? 'opacity-50 pointer-events-none' : ''}">
             ${loading ? `
               <span class="inline-flex items-center gap-2">
@@ -132,6 +146,16 @@ export function showAuthModal() {
       e.stopPropagation();
       const email = modal.querySelector('#auth-email').value;
       const password = modal.querySelector('#auth-password').value;
+      const captchaAns = parseInt(modal.querySelector('#auth-captcha').value, 10);
+      
+      if (captchaAns !== (captchaNum1 + captchaNum2)) {
+        error = 'Human verification failed. Please try again.';
+        captchaNum1 = Math.floor(Math.random() * 10) + 1;
+        captchaNum2 = Math.floor(Math.random() * 10) + 1;
+        render();
+        return;
+      }
+
       loading = true;
       error = '';
       const submitBtn = modal.querySelector('#auth-email-form button[type="submit"]');
@@ -156,6 +180,8 @@ export function showAuthModal() {
     modal.querySelector('#auth-toggle-mode').addEventListener('click', () => {
       mode = isSignIn ? 'signup' : 'signin';
       error = '';
+      captchaNum1 = Math.floor(Math.random() * 10) + 1;
+      captchaNum2 = Math.floor(Math.random() * 10) + 1;
       render();
     });
 

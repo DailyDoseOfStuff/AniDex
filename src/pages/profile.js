@@ -6,8 +6,9 @@
 import { 
   getListCounts, getTotalEpisodesWatched, getTopGenres, 
   getRecentlyAdded, getPreferredTitle, LIST_LABELS, LIST_ICONS, LIST_CATEGORIES,
-  onChange, exportData 
+  onChange, exportData, importData, addToList
 } from '../data/storage.js';
+import { fetchAnimeByMalIds } from '../api.js';
 import { getCurrentUser, getUserInfo, signOut, isLoggedIn, isAnonymous } from '../auth.js';
 import { showAuthModal } from '../components/authModal.js';
 
@@ -78,7 +79,12 @@ function renderPage(app) {
               </button>
             ` : ''}
           </div>
-          <div class="md:ml-auto flex gap-2">
+          <div class="md:ml-auto flex gap-2 flex-wrap justify-center md:justify-end">
+            <button id="import-btn" class="relative bg-surface-container-high text-on-surface-variant px-4 py-2 rounded-lg font-label-lg text-label-lg flex items-center gap-2 hover:bg-surface-variant transition-colors border border-white/5 cursor-pointer">
+              <span class="material-symbols-outlined text-[18px]">upload</span>
+              Import Data
+              <input type="file" id="import-file" accept=".json,.xml" class="absolute inset-0 opacity-0 cursor-pointer w-full h-full" />
+            </button>
             <button id="export-btn" class="bg-surface-container-high text-on-surface-variant px-4 py-2 rounded-lg font-label-lg text-label-lg flex items-center gap-2 hover:bg-surface-variant transition-colors border border-white/5">
               <span class="material-symbols-outlined text-[18px]">download</span>
               Export Data
@@ -246,6 +252,78 @@ function renderPage(app) {
       window.location.hash = `/anime/${card.getAttribute('data-anime-id')}`;
     });
   });
+
+  // Import button logic
+  const importFile = document.getElementById('import-file');
+  if (importFile) {
+    importFile.addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      // Show temporary loading indicator
+      const btn = document.getElementById('import-btn');
+      const originalText = btn.innerHTML;
+      btn.innerHTML = '<span class="material-symbols-outlined animate-spin text-[18px]">sync</span> Importing...';
+      btn.style.pointerEvents = 'none';
+
+      const reader = new FileReader();
+      reader.onload = async (event) => {
+        const text = event.target.result;
+        try {
+          if (file.name.endsWith('.json')) {
+            const data = JSON.parse(text);
+            await importData(data);
+            alert('Import successful!');
+          } else if (file.name.endsWith('.xml')) {
+            const parser = new DOMParser();
+            const xmlDoc = parser.parseFromString(text, "text/xml");
+            const animes = xmlDoc.getElementsByTagName('anime');
+            
+            const malData = [];
+            for (let i = 0; i < animes.length; i++) {
+              const node = animes[i];
+              const malId = parseInt(node.getElementsByTagName('series_animedb_id')[0]?.textContent);
+              const statusStr = node.getElementsByTagName('my_status')[0]?.textContent || '';
+              
+              let category = LIST_CATEGORIES.PLAN_TO_WATCH;
+              if (statusStr === 'Watching') category = LIST_CATEGORIES.WATCHING;
+              else if (statusStr === 'Completed') category = LIST_CATEGORIES.COMPLETED;
+              else if (statusStr === 'On-Hold' || statusStr === 'Dropped') category = LIST_CATEGORIES.ON_HOLD;
+              
+              if (!isNaN(malId)) {
+                malData.push({ malId, category });
+              }
+            }
+
+            if (malData.length === 0) {
+              alert('No valid anime found in XML.');
+              return;
+            }
+
+            const fetchedAnime = await fetchAnimeByMalIds(malData.map(d => d.malId));
+            
+            let importedCount = 0;
+            for (const item of malData) {
+              const anime = fetchedAnime.find(a => a.idMal === item.malId);
+              if (anime) {
+                await addToList(anime.id, anime, item.category);
+                importedCount++;
+              }
+            }
+            alert(`Successfully imported ${importedCount} anime from MyAnimeList XML!`);
+          }
+        } catch (err) {
+          console.error(err);
+          alert('Failed to parse or import file.');
+        } finally {
+          btn.innerHTML = originalText;
+          btn.style.pointerEvents = 'auto';
+          importFile.value = ''; // Reset file input
+        }
+      };
+      reader.readAsText(file);
+    });
+  }
 
   // Export button
   document.getElementById('export-btn')?.addEventListener('click', () => {
