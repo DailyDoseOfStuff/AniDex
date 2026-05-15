@@ -70,9 +70,9 @@ export function showListModal(anime, anchorElement) {
 
   // Category click handlers
   dropdown.querySelectorAll('.list-option').forEach(btn => {
-    btn.addEventListener('click', (e) => {
+    btn.addEventListener('click', async (e) => {
       const category = btn.getAttribute('data-category');
-      addToList(anime.id, anime, category);
+      await addToList(anime.id, anime, category);
       showToast(`Added to ${LIST_LABELS[category]}`);
       closeListModal();
     });
@@ -81,8 +81,8 @@ export function showListModal(anime, anchorElement) {
   // Remove handler
   const removeBtn = dropdown.querySelector('.remove-btn');
   if (removeBtn) {
-    removeBtn.addEventListener('click', () => {
-      removeFromAllLists(anime.id);
+    removeBtn.addEventListener('click', async () => {
+      await removeFromAllLists(anime.id);
       showToast('Removed from list');
       closeListModal();
     });

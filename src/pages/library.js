@@ -159,11 +159,11 @@ function attachCardHandlers() {
 
   // Remove button
   document.querySelectorAll('.remove-btn').forEach(btn => {
-    btn.addEventListener('click', (e) => {
+    btn.addEventListener('click', async (e) => {
       e.stopPropagation();
       const card = btn.closest('.library-card');
       const animeId = parseInt(card.getAttribute('data-anime-id'));
-      removeFromAllLists(animeId);
+      await removeFromAllLists(animeId);
     });
   });
 }
@@ -194,8 +194,8 @@ function showMoveDropdown(animeId, anchorEl) {
   `).join('');
 
   dropdown.querySelectorAll('button').forEach(btn => {
-    btn.addEventListener('click', () => {
-      moveToList(animeId, btn.getAttribute('data-category'));
+    btn.addEventListener('click', async () => {
+      await moveToList(animeId, btn.getAttribute('data-category'));
       dropdown.remove();
       backdrop.remove();
     });

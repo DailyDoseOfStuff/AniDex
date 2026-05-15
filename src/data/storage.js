@@ -1,10 +1,13 @@
 /**
  * Abstracted Storage Layer
- * Currently uses localStorage. Designed to be swapped for a cloud backend later.
+ * Uses Firestore when logged in, falls back to localStorage for guests.
  * 
  * All public methods return/accept plain objects.
- * When migrating to cloud, only the internal implementation needs to change.
+ * Firestore path: users/{uid}/data/watchlist and users/{uid}/data/settings
  */
+import { db } from '../firebase.js';
+import { getCurrentUser, isLoggedIn, isAnonymous } from '../auth.js';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
 
 const STORAGE_KEYS = {
   WATCHLIST: 'anitrack_watchlist',
@@ -34,9 +37,24 @@ export const LIST_ICONS = {
   [LIST_CATEGORIES.ON_HOLD]: 'pause_circle'
 };
 
-// ========== Internal Helpers ==========
+// ========== In-memory cache for Firestore data ==========
+// Prevents re-reading Firestore on every single getter call
+let _firestoreWatchlistCache = null;
+let _firestoreSettingsCache = null;
+let _firestoreCacheDirty = true; // true = need to re-fetch from Firestore
 
-function _read(key) {
+/**
+ * Mark the Firestore cache as needing refresh (e.g. after auth change)
+ */
+export function invalidateFirestoreCache() {
+  _firestoreWatchlistCache = null;
+  _firestoreSettingsCache = null;
+  _firestoreCacheDirty = true;
+}
+
+// ========== Internal Helpers: localStorage ==========
+
+function _readLocal(key) {
   try {
     const raw = localStorage.getItem(key);
     return raw ? JSON.parse(raw) : null;
@@ -45,7 +63,7 @@ function _read(key) {
   }
 }
 
-function _write(key, data) {
+function _writeLocal(key, data) {
   try {
     localStorage.setItem(key, JSON.stringify(data));
   } catch (e) {
@@ -53,17 +71,170 @@ function _write(key, data) {
   }
 }
 
-function _getWatchlist() {
-  return _read(STORAGE_KEYS.WATCHLIST) || {
-    watching: [],
-    completed: [],
-    planToWatch: [],
-    onHold: []
-  };
+// ========== Internal Helpers: Firestore ==========
+
+function _getUserDocRef(collection) {
+  const user = getCurrentUser();
+  if (!user) return null;
+  return doc(db, 'users', user.uid, 'data', collection);
 }
 
-function _saveWatchlist(watchlist) {
-  _write(STORAGE_KEYS.WATCHLIST, watchlist);
+async function _readFirestore(collection) {
+  const docRef = _getUserDocRef(collection);
+  if (!docRef) return null;
+  try {
+    const snap = await getDoc(docRef);
+    return snap.exists() ? snap.data() : null;
+  } catch (e) {
+    console.error(`Firestore read error (${collection}):`, e);
+    return null;
+  }
+}
+
+async function _writeFirestore(collection, data) {
+  const docRef = _getUserDocRef(collection);
+  if (!docRef) return;
+  try {
+    await setDoc(docRef, data);
+  } catch (e) {
+    console.error(`Firestore write error (${collection}):`, e);
+  }
+}
+
+// ========== Unified Read/Write ==========
+
+function _useFirestore() {
+  const user = getCurrentUser();
+  return user !== null; // Use Firestore for any authenticated user (including anonymous)
+}
+
+function _getWatchlistSync() {
+  // Synchronous — uses cache for Firestore, direct read for localStorage
+  if (_useFirestore() && _firestoreWatchlistCache !== null) {
+    return _firestoreWatchlistCache;
+  }
+  return _readLocal(STORAGE_KEYS.WATCHLIST) || _defaultWatchlist();
+}
+
+function _defaultWatchlist() {
+  return { watching: [], completed: [], planToWatch: [], onHold: [] };
+}
+
+async function _getWatchlistAsync() {
+  if (_useFirestore()) {
+    if (_firestoreWatchlistCache && !_firestoreCacheDirty) {
+      return _firestoreWatchlistCache;
+    }
+    const data = await _readFirestore('watchlist');
+    _firestoreWatchlistCache = data || _defaultWatchlist();
+    _firestoreCacheDirty = false;
+    return _firestoreWatchlistCache;
+  }
+  return _readLocal(STORAGE_KEYS.WATCHLIST) || _defaultWatchlist();
+}
+
+async function _saveWatchlist(watchlist) {
+  if (_useFirestore()) {
+    _firestoreWatchlistCache = watchlist;
+    await _writeFirestore('watchlist', watchlist);
+  } else {
+    _writeLocal(STORAGE_KEYS.WATCHLIST, watchlist);
+  }
+}
+
+function _getSettingsSync() {
+  if (_useFirestore() && _firestoreSettingsCache !== null) {
+    return _firestoreSettingsCache;
+  }
+  return _readLocal(STORAGE_KEYS.SETTINGS) || { titleLanguage: 'english' };
+}
+
+async function _getSettingsAsync() {
+  if (_useFirestore()) {
+    if (_firestoreSettingsCache && !_firestoreCacheDirty) {
+      return _firestoreSettingsCache;
+    }
+    const data = await _readFirestore('settings');
+    _firestoreSettingsCache = data || { titleLanguage: 'english' };
+    return _firestoreSettingsCache;
+  }
+  return _readLocal(STORAGE_KEYS.SETTINGS) || { titleLanguage: 'english' };
+}
+
+async function _saveSettings(settings) {
+  if (_useFirestore()) {
+    _firestoreSettingsCache = settings;
+    await _writeFirestore('settings', settings);
+  } else {
+    _writeLocal(STORAGE_KEYS.SETTINGS, settings);
+  }
+}
+
+// ========== Migration: localStorage → Firestore ==========
+
+/**
+ * Migrate existing localStorage data to Firestore for the current user.
+ * Called on first login. Merges local data into cloud (won't overwrite existing cloud data).
+ */
+export async function migrateLocalToCloud() {
+  if (!_useFirestore()) return false;
+
+  const localWatchlist = _readLocal(STORAGE_KEYS.WATCHLIST);
+  const localSettings = _readLocal(STORAGE_KEYS.SETTINGS);
+
+  if (!localWatchlist && !localSettings) return false; // Nothing to migrate
+
+  // Check if cloud already has data
+  const cloudWatchlist = await _readFirestore('watchlist');
+
+  if (cloudWatchlist && Object.values(LIST_CATEGORIES).some(cat => (cloudWatchlist[cat] || []).length > 0)) {
+    // Cloud already has data — merge local into it (avoid duplicates)
+    if (localWatchlist) {
+      for (const cat of Object.values(LIST_CATEGORIES)) {
+        const cloudList = cloudWatchlist[cat] || [];
+        const localList = localWatchlist[cat] || [];
+        const cloudIds = new Set(cloudList.map(a => a.id));
+        for (const anime of localList) {
+          if (!cloudIds.has(anime.id)) {
+            cloudList.push(anime);
+          }
+        }
+        cloudWatchlist[cat] = cloudList;
+      }
+      await _writeFirestore('watchlist', cloudWatchlist);
+      _firestoreWatchlistCache = cloudWatchlist;
+    }
+  } else {
+    // Cloud is empty — push local data up
+    if (localWatchlist) {
+      await _writeFirestore('watchlist', localWatchlist);
+      _firestoreWatchlistCache = localWatchlist;
+    }
+  }
+
+  // Migrate settings (cloud wins if exists)
+  const cloudSettings = await _readFirestore('settings');
+  if (!cloudSettings && localSettings) {
+    await _writeFirestore('settings', localSettings);
+    _firestoreSettingsCache = localSettings;
+  }
+
+  // Clear local data after migration
+  localStorage.removeItem(STORAGE_KEYS.WATCHLIST);
+  localStorage.removeItem(STORAGE_KEYS.SETTINGS);
+
+  _firestoreCacheDirty = false;
+  return true;
+}
+
+/**
+ * Load Firestore data into cache (call after auth state change)
+ */
+export async function loadCloudData() {
+  if (!_useFirestore()) return;
+  _firestoreWatchlistCache = await _readFirestore('watchlist') || _defaultWatchlist();
+  _firestoreSettingsCache = await _readFirestore('settings') || { titleLanguage: 'english' };
+  _firestoreCacheDirty = false;
 }
 
 // ========== Watchlist API ==========
@@ -71,17 +242,15 @@ function _saveWatchlist(watchlist) {
 /**
  * Add anime to a list category
  * @param {number} animeId - AniList media ID
- * @param {object} animeData - Basic anime data to store { id, title, coverImage, genres, episodes, format, status, averageScore }
+ * @param {object} animeData - Basic anime data to store
  * @param {string} category - One of LIST_CATEGORIES values
  */
-export function addToList(animeId, animeData, category) {
-  const watchlist = _getWatchlist();
-
+export async function addToList(animeId, animeData, category) {
   // Remove from any existing category first
-  removeFromAllLists(animeId);
+  await removeFromAllLists(animeId);
 
   // Re-read after removal
-  const updated = _getWatchlist();
+  const updated = await _getWatchlistAsync();
 
   // Add to specified category
   if (!updated[category]) updated[category] = [];
@@ -97,18 +266,18 @@ export function addToList(animeId, animeData, category) {
     averageScore: animeData.averageScore
   });
 
-  _saveWatchlist(updated);
+  await _saveWatchlist(updated);
   _dispatchChange();
 }
 
 /**
  * Remove anime from a specific list
  */
-export function removeFromList(animeId, category) {
-  const watchlist = _getWatchlist();
+export async function removeFromList(animeId, category) {
+  const watchlist = await _getWatchlistAsync();
   if (watchlist[category]) {
     watchlist[category] = watchlist[category].filter(a => a.id !== animeId);
-    _saveWatchlist(watchlist);
+    await _saveWatchlist(watchlist);
     _dispatchChange();
   }
 }
@@ -116,22 +285,22 @@ export function removeFromList(animeId, category) {
 /**
  * Remove anime from all lists
  */
-export function removeFromAllLists(animeId) {
-  const watchlist = _getWatchlist();
+export async function removeFromAllLists(animeId) {
+  const watchlist = await _getWatchlistAsync();
   for (const cat of Object.values(LIST_CATEGORIES)) {
     if (watchlist[cat]) {
       watchlist[cat] = watchlist[cat].filter(a => a.id !== animeId);
     }
   }
-  _saveWatchlist(watchlist);
+  await _saveWatchlist(watchlist);
   _dispatchChange();
 }
 
 /**
  * Move anime between categories
  */
-export function moveToList(animeId, newCategory) {
-  const watchlist = _getWatchlist();
+export async function moveToList(animeId, newCategory) {
+  const watchlist = await _getWatchlistAsync();
   let animeData = null;
 
   // Find and remove from current category
@@ -150,31 +319,31 @@ export function moveToList(animeId, newCategory) {
     if (!watchlist[newCategory]) watchlist[newCategory] = [];
     animeData.addedAt = Date.now(); // Update timestamp
     watchlist[newCategory].push(animeData);
-    _saveWatchlist(watchlist);
+    await _saveWatchlist(watchlist);
     _dispatchChange();
   }
 }
 
 /**
- * Get all anime in a specific list
+ * Get all anime in a specific list (sync - uses cache)
  */
 export function getList(category) {
-  const watchlist = _getWatchlist();
+  const watchlist = _getWatchlistSync();
   return watchlist[category] || [];
 }
 
 /**
- * Get the full watchlist (all categories)
+ * Get the full watchlist (all categories) (sync - uses cache)
  */
 export function getAllLists() {
-  return _getWatchlist();
+  return _getWatchlistSync();
 }
 
 /**
  * Check which list an anime is in (returns category string or null)
  */
 export function getAnimeStatus(animeId) {
-  const watchlist = _getWatchlist();
+  const watchlist = _getWatchlistSync();
   for (const cat of Object.values(LIST_CATEGORIES)) {
     if (watchlist[cat]?.some(a => a.id === animeId)) {
       return cat;
@@ -187,7 +356,7 @@ export function getAnimeStatus(animeId) {
  * Get all anime IDs across all lists
  */
 export function getAllAnimeIds() {
-  const watchlist = _getWatchlist();
+  const watchlist = _getWatchlistSync();
   const ids = [];
   for (const cat of Object.values(LIST_CATEGORIES)) {
     if (watchlist[cat]) {
@@ -201,7 +370,7 @@ export function getAllAnimeIds() {
  * Get counts for each category
  */
 export function getListCounts() {
-  const watchlist = _getWatchlist();
+  const watchlist = _getWatchlistSync();
   return {
     watching: (watchlist.watching || []).length,
     completed: (watchlist.completed || []).length,
@@ -215,7 +384,7 @@ export function getListCounts() {
  * Get user's top genres (from all watchlist anime)
  */
 export function getTopGenres(limit = 5) {
-  const watchlist = _getWatchlist();
+  const watchlist = _getWatchlistSync();
   const genreCounts = {};
 
   for (const cat of Object.values(LIST_CATEGORIES)) {
@@ -248,7 +417,7 @@ export function getTotalEpisodesWatched() {
  * Get recently added anime (across all lists, sorted by addedAt)
  */
 export function getRecentlyAdded(limit = 10) {
-  const watchlist = _getWatchlist();
+  const watchlist = _getWatchlistSync();
   const all = [];
   for (const cat of Object.values(LIST_CATEGORIES)) {
     if (watchlist[cat]) {
@@ -260,30 +429,22 @@ export function getRecentlyAdded(limit = 10) {
 
 // ========== Settings API ==========
 
-function _getSettings() {
-  return _read(STORAGE_KEYS.SETTINGS) || {
-    titleLanguage: 'english', // 'english' | 'romaji' | 'native'
-  };
-}
-
-function _saveSettings(settings) {
-  _write(STORAGE_KEYS.SETTINGS, settings);
-}
-
 /**
- * Get title language preference
+ * Get title language preference (sync)
  */
 export function getTitleLanguage() {
-  return _getSettings().titleLanguage;
+  return _getSettingsSync().titleLanguage;
 }
 
 /**
  * Set title language preference
  */
-export function setTitleLanguage(lang) {
-  const settings = _getSettings();
+export async function setTitleLanguage(lang) {
+  const settings = _useFirestore()
+    ? (await _getSettingsAsync())
+    : _getSettingsSync();
   settings.titleLanguage = lang;
-  _saveSettings(settings);
+  await _saveSettings(settings);
   _dispatchChange();
 }
 
@@ -322,8 +483,8 @@ export function onChange(callback) {
  */
 export function exportData() {
   return {
-    watchlist: _getWatchlist(),
-    settings: _getSettings(),
+    watchlist: _getWatchlistSync(),
+    settings: _getSettingsSync(),
     exportedAt: new Date().toISOString()
   };
 }
@@ -331,8 +492,8 @@ export function exportData() {
 /**
  * Import data (for future migration)
  */
-export function importData(data) {
-  if (data.watchlist) _saveWatchlist(data.watchlist);
-  if (data.settings) _saveSettings(data.settings);
+export async function importData(data) {
+  if (data.watchlist) await _saveWatchlist(data.watchlist);
+  if (data.settings) await _saveSettings(data.settings);
   _dispatchChange();
 }
