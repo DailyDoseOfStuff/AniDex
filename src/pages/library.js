@@ -2,9 +2,9 @@
  * Library Page
  * Watchlist with tabs: Watching, Completed, Plan to Watch, On Hold
  */
-import { getList, getListCounts, removeFromAllLists, moveToList, getPreferredTitle, LIST_CATEGORIES, LIST_LABELS, LIST_ICONS, onChange } from '../data/storage.js';
+import { getList, getAllLists, getListCounts, removeFromAllLists, moveToList, getPreferredTitle, LIST_CATEGORIES, LIST_LABELS, LIST_ICONS, onChange } from '../data/storage.js';
 
-let activeTab = LIST_CATEGORIES.WATCHING;
+let activeTab = 'all';
 let unsubscribe = null;
 
 export async function renderLibraryPage() {
@@ -26,7 +26,14 @@ export async function renderLibraryPage() {
 
 function renderPage(app) {
   const counts = getListCounts();
-  const currentList = getList(activeTab);
+  let currentList = [];
+  if (activeTab === 'all') {
+    const allLists = getAllLists();
+    currentList = Object.values(LIST_CATEGORIES).flatMap(cat => allLists[cat] || []);
+    currentList.sort((a, b) => (b.addedAt || 0) - (a.addedAt || 0));
+  } else {
+    currentList = getList(activeTab);
+  }
 
   app.innerHTML = `
     <div class="max-w-[1200px] mx-auto px-4 md:px-lg pt-8 pb-8 page-enter">
@@ -34,6 +41,15 @@ function renderPage(app) {
 
       <!-- Tabs -->
       <div class="flex gap-1 bg-surface-container rounded-xl p-1 mb-8 overflow-x-auto hide-scrollbar">
+        <button class="library-tab flex-1 min-w-[120px] px-4 py-3 rounded-lg font-label-lg text-label-lg flex items-center justify-center gap-2 transition-all whitespace-nowrap ${
+          activeTab === 'all' 
+            ? 'bg-primary text-on-primary shadow-lg' 
+            : 'text-on-surface-variant hover:bg-white/5'
+        }" data-tab="all">
+          <span class="material-symbols-outlined text-[18px]" ${activeTab === 'all' ? 'style="font-variation-settings: \'FILL\' 1;"' : ''}>view_list</span>
+          All Anime
+          ${counts.total > 0 ? `<span class="bg-white/20 text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[20px] text-center">${counts.total}</span>` : ''}
+        </button>
         ${Object.entries(LIST_CATEGORIES).map(([key, value]) => {
           const isActive = activeTab === value;
           const count = counts[value] || 0;
@@ -117,13 +133,14 @@ function renderAnimeGrid(animeList) {
 
 function renderEmptyState() {
   const messages = {
+    'all': { icon: 'view_list', text: 'Your library is empty', sub: 'Start adding anime from the search page!' },
     [LIST_CATEGORIES.WATCHING]: { icon: 'play_circle', text: 'No anime currently watching', sub: 'Start watching something from the search page!' },
     [LIST_CATEGORIES.COMPLETED]: { icon: 'check_circle', text: 'No completed anime yet', sub: 'Finish watching some anime to see them here.' },
     [LIST_CATEGORIES.PLAN_TO_WATCH]: { icon: 'bookmark', text: 'Nothing planned to watch', sub: 'Browse and add anime you want to watch later.' },
     [LIST_CATEGORIES.ON_HOLD]: { icon: 'pause_circle', text: 'Nothing on hold', sub: 'Anime you pause will appear here.' }
   };
 
-  const msg = messages[activeTab];
+  const msg = messages[activeTab] || messages['all'];
   return `
     <div class="text-center py-20">
       <span class="material-symbols-outlined text-[80px] text-on-surface-variant/30 mb-4">${msg.icon}</span>
