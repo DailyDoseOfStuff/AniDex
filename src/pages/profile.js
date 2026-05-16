@@ -6,7 +6,7 @@
 import { 
   getListCounts, getTotalEpisodesWatched, getTopGenres, 
   getRecentlyAdded, getPreferredTitle, LIST_LABELS, LIST_ICONS, LIST_CATEGORIES,
-  onChange, exportData, importData, addToList, clearWatchlist
+  onChange, exportData, importData, addToList, addManyToLists, clearWatchlist
 } from '../data/storage.js';
 import { fetchAnimeByMalIds, fetchAnimeByALIds } from '../api.js';
 import { getCurrentUser, getUserInfo, signOut, isLoggedIn, isAnonymous } from '../auth.js';
@@ -360,15 +360,14 @@ function renderPage(app) {
           }
 
           // Fetch missing AniList data
-          let importedCount = 0;
+          let itemsToAdd = [];
           
           if (malItems.length > 0) {
             const fetchedMal = await fetchAnimeByMalIds(malItems.map(d => d.malId));
             for (const item of malItems) {
               const anime = fetchedMal.find(a => a.idMal === item.malId);
               if (anime) {
-                await addToList(anime.id, anime, item.category);
-                importedCount++;
+                itemsToAdd.push({ id: anime.id, data: anime, category: item.category });
               }
             }
           }
@@ -378,16 +377,16 @@ function renderPage(app) {
             for (const item of alItems) {
               const anime = fetchedAl.find(a => a.id === item.id);
               if (anime) {
-                await addToList(anime.id, anime, item.category);
-                importedCount++;
+                itemsToAdd.push({ id: anime.id, data: anime, category: item.category });
               }
             }
           }
 
-          if (importedCount === 0 && (malItems.length > 0 || alItems.length > 0)) {
+          if (itemsToAdd.length > 0) {
+            await addManyToLists(itemsToAdd);
+            alert(`Successfully imported ${itemsToAdd.length} anime!`);
+          } else if (malItems.length > 0 || alItems.length > 0) {
             alert('Found items but failed to fetch data from AniList.');
-          } else if (importedCount > 0) {
-            alert(`Successfully imported ${importedCount} anime!`);
           } else {
             alert('No valid anime found in the file.');
           }
@@ -396,9 +395,14 @@ function renderPage(app) {
           console.error(err);
           alert('Failed to parse or import file.');
         } finally {
-          btn.innerHTML = originalText;
-          btn.style.pointerEvents = 'auto';
-          importFile.value = ''; // Reset file input
+          const currentBtn = document.getElementById('import-btn');
+          if (currentBtn) {
+            currentBtn.innerHTML = originalText;
+            currentBtn.style.pointerEvents = 'auto';
+          }
+          if (document.getElementById('import-file')) {
+            document.getElementById('import-file').value = ''; // Reset file input
+          }
         }
       };
       reader.readAsText(file);

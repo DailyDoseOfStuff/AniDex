@@ -271,6 +271,42 @@ export async function addToList(animeId, animeData, category) {
 }
 
 /**
+ * Add multiple anime to list categories in a single batch operation.
+ * @param {Array<{id: number, data: object, category: string}>} items 
+ */
+export async function addManyToLists(items) {
+  const updated = await _getWatchlistAsync();
+
+  for (const item of items) {
+    const { id: animeId, data: animeData, category } = item;
+
+    // Remove from existing
+    for (const cat of Object.values(LIST_CATEGORIES)) {
+      if (updated[cat]) {
+        updated[cat] = updated[cat].filter(a => a.id !== animeId);
+      }
+    }
+
+    // Add to new
+    if (!updated[category]) updated[category] = [];
+    updated[category].push({
+      id: animeId,
+      addedAt: Date.now(), // might be slightly inaccurate for batch, but fine
+      title: animeData.title,
+      coverImage: animeData.coverImage,
+      genres: animeData.genres,
+      episodes: animeData.episodes,
+      format: animeData.format,
+      status: animeData.status,
+      averageScore: animeData.averageScore
+    });
+  }
+
+  await _saveWatchlist(updated);
+  _dispatchChange();
+}
+
+/**
  * Remove anime from a specific list
  */
 export async function removeFromList(animeId, category) {
