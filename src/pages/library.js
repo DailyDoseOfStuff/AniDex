@@ -2,7 +2,7 @@
  * Library Page
  * Watchlist with tabs: Watching, Completed, Plan to Watch, On Hold
  */
-import { getList, getAllLists, getListCounts, removeFromAllLists, moveToList, getPreferredTitle, LIST_CATEGORIES, LIST_LABELS, LIST_ICONS, onChange } from '../data/storage.js';
+import { getList, getAllLists, getListCounts, removeFromAllLists, moveToList, getPreferredTitle, LIST_CATEGORIES, LIST_LABELS, LIST_ICONS, onChange, isDataLoaded } from '../data/storage.js';
 
 let activeTab = 'all';
 let unsubscribe = null;
@@ -25,6 +25,19 @@ export async function renderLibraryPage() {
 }
 
 function renderPage(app) {
+  if (!isDataLoaded()) {
+    app.innerHTML = `
+      <div class="max-w-[1200px] mx-auto px-4 md:px-lg pt-20 text-center page-enter">
+        <div class="flex flex-col items-center gap-4">
+          <span class="material-symbols-outlined text-[64px] text-primary animate-spin">sync</span>
+          <h2 class="font-headline-md text-headline-md text-on-surface">Loading your library...</h2>
+          <p class="text-on-surface-variant font-body-md">Fetching your synced data from the cloud</p>
+        </div>
+      </div>
+    `;
+    return;
+  }
+
   const counts = getListCounts();
   let currentList = [];
   if (activeTab === 'all') {

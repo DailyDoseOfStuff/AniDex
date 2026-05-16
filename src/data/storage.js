@@ -86,8 +86,8 @@ async function _readFirestore(collection) {
     const snap = await getDoc(docRef);
     return snap.exists() ? snap.data() : null;
   } catch (e) {
-    console.error(`Firestore read error (${collection}):`, e);
-    return null;
+    console.error(`AniTrack: Firestore read error (${collection}):`, e);
+    throw e; // Rethrow to allow caller to handle failure
   }
 }
 
@@ -110,8 +110,8 @@ function _useFirestore() {
 
 function _getWatchlistSync() {
   // Synchronous — uses cache for Firestore, direct read for localStorage
-  if (_useFirestore() && _firestoreWatchlistCache !== null) {
-    return _firestoreWatchlistCache;
+  if (_useFirestore()) {
+    return _firestoreWatchlistCache; // Could be null if not loaded yet
   }
   return _readLocal(STORAGE_KEYS.WATCHLIST) || _defaultWatchlist();
 }
@@ -227,15 +227,41 @@ export async function migrateLocalToCloud() {
   return true;
 }
 
+let _loadingCloudData = false;
+
 /**
  * Load Firestore data into cache (call after auth state change)
  */
 export async function loadCloudData() {
-  if (!_useFirestore()) return;
-  _firestoreWatchlistCache = await _readFirestore('watchlist') || _defaultWatchlist();
-  _firestoreSettingsCache = await _readFirestore('settings') || { titleLanguage: 'english' };
-  _firestoreCacheDirty = false;
-  _dispatchChange();
+  if (!_useFirestore() || _loadingCloudData) return;
+  
+  _loadingCloudData = true;
+  try {
+    console.log('AniTrack: Loading cloud data...');
+    const watchlist = await _readFirestore('watchlist');
+    const settings = await _readFirestore('settings');
+    
+    // Only update cache if we actually got data (or null meaning doc doesn't exist)
+    _firestoreWatchlistCache = watchlist || _defaultWatchlist();
+    _firestoreSettingsCache = settings || { titleLanguage: 'english' };
+    _firestoreCacheDirty = false;
+    
+    console.log('AniTrack: Cloud data loaded successfully');
+    _dispatchChange();
+  } catch (e) {
+    console.error('AniTrack: Failed to load cloud data:', e);
+    // If it fails, we keep the previous cache to avoid showing an empty list
+  } finally {
+    _loadingCloudData = false;
+  }
+}
+
+/**
+ * Check if data is currently loaded (or if we are in local mode)
+ */
+export function isDataLoaded() {
+  if (!_useFirestore()) return true;
+  return _firestoreWatchlistCache !== null;
 }
 
 // ========== Watchlist API ==========
@@ -374,6 +400,7 @@ export async function moveToList(animeId, newCategory) {
  */
 export function getList(category) {
   const watchlist = _getWatchlistSync();
+  if (!watchlist) return [];
   return watchlist[category] || [];
 }
 
@@ -389,6 +416,7 @@ export function getAllLists() {
  */
 export function getAnimeStatus(animeId) {
   const watchlist = _getWatchlistSync();
+  if (!watchlist) return null;
   for (const cat of Object.values(LIST_CATEGORIES)) {
     if (watchlist[cat]?.some(a => a.id === animeId)) {
       return cat;
@@ -402,6 +430,7 @@ export function getAnimeStatus(animeId) {
  */
 export function getAllAnimeIds() {
   const watchlist = _getWatchlistSync();
+  if (!watchlist) return [];
   const ids = [];
   for (const cat of Object.values(LIST_CATEGORIES)) {
     if (watchlist[cat]) {
@@ -416,6 +445,7 @@ export function getAllAnimeIds() {
  */
 export function getListCounts() {
   const watchlist = _getWatchlistSync();
+  if (!watchlist) return { watching: 0, completed: 0, planToWatch: 0, onHold: 0, total: 0 };
   return {
     watching: (watchlist.watching || []).length,
     completed: (watchlist.completed || []).length,
@@ -430,6 +460,7 @@ export function getListCounts() {
  */
 export function getTopGenres(limit = 5) {
   const watchlist = _getWatchlistSync();
+  if (!watchlist) return [];
   const genreCounts = {};
 
   for (const cat of Object.values(LIST_CATEGORIES)) {
@@ -463,6 +494,7 @@ export function getTotalEpisodesWatched() {
  */
 export function getRecentlyAdded(limit = 10) {
   const watchlist = _getWatchlistSync();
+  if (!watchlist) return [];
   const all = [];
   for (const cat of Object.values(LIST_CATEGORIES)) {
     if (watchlist[cat]) {

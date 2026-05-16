@@ -37,14 +37,28 @@ async function init() {
   });
 
   // Initialize Firebase Auth — waits for initial auth state
+  let initialUser = null;
   try {
-    await initAuth();
+    initialUser = await initAuth();
   } catch (e) {
     console.warn('Firebase auth init failed (app will work in offline/local mode):', e);
   }
 
+  // Handle initial page load data fetch
+  if (initialUser) {
+    invalidateFirestoreCache();
+    const migrated = await migrateLocalToCloud();
+    if (migrated) {
+      console.log('AniTrack: Local data migrated to cloud');
+    }
+    await loadCloudData();
+  }
+
   // Handle auth state changes — migrate data and reload cloud data
   onAuthChange(async (user, previousUser) => {
+    // Only act if the user ID has actually changed (prevents issues on token refresh)
+    if (user?.uid === previousUser?.uid) return;
+
     if (user) {
       // User just signed in
       invalidateFirestoreCache();
@@ -60,7 +74,7 @@ async function init() {
 
       // Re-render the current page to reflect synced data
       window.dispatchEvent(new HashChangeEvent('hashchange'));
-    } else if (previousUser) {
+    } else {
       // User just signed out — reset to localStorage
       invalidateFirestoreCache();
       window.dispatchEvent(new HashChangeEvent('hashchange'));

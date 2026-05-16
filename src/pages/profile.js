@@ -6,7 +6,8 @@
 import { 
   getListCounts, getTotalEpisodesWatched, getTopGenres, 
   getRecentlyAdded, getPreferredTitle, LIST_LABELS, LIST_ICONS, LIST_CATEGORIES,
-  onChange, exportData, importData, addToList, addManyToLists, clearWatchlist
+  onChange, exportData, importData, addToList, addManyToLists, clearWatchlist,
+  isDataLoaded
 } from '../data/storage.js';
 import { fetchAnimeByMalIds, fetchAnimeByALIds } from '../api.js';
 import { getCurrentUser, getUserInfo, signOut, isLoggedIn, isAnonymous } from '../auth.js';
@@ -31,6 +32,19 @@ export async function renderProfilePage() {
 }
 
 function renderPage(app) {
+  if (!isDataLoaded()) {
+    app.innerHTML = `
+      <div class="max-w-[1200px] mx-auto px-4 md:px-lg pt-20 text-center page-enter">
+        <div class="flex flex-col items-center gap-4">
+          <span class="material-symbols-outlined text-[64px] text-primary animate-spin">sync</span>
+          <h2 class="font-headline-md text-headline-md text-on-surface">Loading your profile...</h2>
+          <p class="text-on-surface-variant font-body-md">Fetching your synced data from the cloud</p>
+        </div>
+      </div>
+    `;
+    return;
+  }
+
   const counts = getListCounts();
   const episodes = getTotalEpisodesWatched();
   const topGenres = getTopGenres(8);

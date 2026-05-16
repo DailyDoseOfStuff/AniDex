@@ -3,7 +3,7 @@
  * Hero bento, trending, popular this season, upcoming, recommended for you
  */
 import { fetchTrending, fetchPopularThisSeason, fetchUpcoming, fetchByGenres, fetchAiringSchedule, getWeekStart, DAY_NAMES, getCurrentSeason } from '../api.js';
-import { getPreferredTitle, getTopGenres, getAllAnimeIds, getListCounts, getTotalEpisodesWatched } from '../data/storage.js';
+import { getPreferredTitle, getTopGenres, getAllAnimeIds, getListCounts, getTotalEpisodesWatched, isDataLoaded } from '../data/storage.js';
 import { createAnimeCard } from '../components/animeCard.js';
 import { showListModal } from '../components/listModal.js';
 import { createHeroSkeleton, createCardSkeletons, createHorizontalSkeletons } from '../components/skeleton.js';
@@ -37,6 +37,11 @@ export async function renderHomePage() {
       fetchUpcoming(1, 6),
       fetchAiringSchedule(startTs, endTs).catch(() => [])
     ]);
+
+    // Ensure cloud data is loaded before proceeding with stats-dependent sections
+    if (!isDataLoaded()) {
+      console.log('AniTrack: Home page waiting for cloud data...');
+    }
 
     const trending = trendingData.media || [];
     const seasonal = seasonData.media || [];
