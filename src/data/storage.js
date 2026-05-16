@@ -235,6 +235,7 @@ export async function loadCloudData() {
   _firestoreWatchlistCache = await _readFirestore('watchlist') || _defaultWatchlist();
   _firestoreSettingsCache = await _readFirestore('settings') || { titleLanguage: 'english' };
   _firestoreCacheDirty = false;
+  _dispatchChange();
 }
 
 // ========== Watchlist API ==========
